@@ -32,6 +32,7 @@ class GoldPricePage extends StatefulWidget {
 
 class GoldPricePageState extends State<GoldPricePage> {
   final GoldDataRepository _repository = GoldDataRepository.instance;
+  GoldBoard? _lastBoundSnapshot;
   final WidgetService _widgetService = WidgetService();
   final ScrollController _scrollController =
       ScrollController(); // Added Controller // Initialize WidgetService
@@ -126,7 +127,23 @@ class GoldPricePageState extends State<GoldPricePage> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _repository.addListener(_onRepositoryChanged);
+    final cachedSnapshot = _repository.snapshot;
+    if (cachedSnapshot != null) {
+      _bindBoardFuture(Future.value(cachedSnapshot));
+      _repository
+          .refresh()
+          .then((board) {
+            if (mounted) _bindBoardFuture(Future.value(board));
+          })
+          .catchError((Object error) {
+            debugPrint(
+              'Background refresh failed; keeping cached snapshot: $error',
+            );
+          });
+    } else {
+      _loadData();
+    }
     // Start polling every 10 minutes (Silent fallback)
     _timer = Timer.periodic(const Duration(minutes: 10), (timer) {
       _checkForUpdates();
@@ -135,9 +152,20 @@ class GoldPricePageState extends State<GoldPricePage> {
 
   @override
   void dispose() {
+    _repository.removeListener(_onRepositoryChanged);
     _timer?.cancel();
     _cooldownTimer?.cancel();
     super.dispose();
+  }
+
+  void _onRepositoryChanged() {
+    final snapshot = _repository.snapshot;
+    if (!mounted ||
+        snapshot == null ||
+        identical(snapshot, _lastBoundSnapshot)) {
+      return;
+    }
+    _bindBoardFuture(Future.value(snapshot));
   }
 
   void _startCooldown() {
@@ -162,6 +190,7 @@ class GoldPricePageState extends State<GoldPricePage> {
 
   void _bindBoardFuture(Future<GoldBoard> boardFuture) {
     final observedBoardFuture = boardFuture.then((board) {
+      _lastBoundSnapshot = board;
       if (mounted) {
         setState(() {
           _isBoardStale = board.stale;

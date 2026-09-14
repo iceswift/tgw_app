@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-// ignore: unused_import
-import 'package:gold_app/models/gold_price_model.dart';
+import 'package:gold_app/models/gold_board_model.dart';
 import 'package:gold_app/models/shop_price_model.dart'; // Import ShopPrice
-import 'package:gold_app/services/gold_api_service.dart';
+import 'package:gold_app/repositories/gold_data_repository.dart';
 import 'package:gold_app/widgets/main_layout_scaffold.dart';
 import 'package:gold_app/utils/ad_config.dart';
 import 'package:gold_app/widgets/banner_ad_with_close_button.dart';
@@ -18,8 +17,6 @@ import 'package:gold_app/utils/image_saver_web.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import 'dart:async'; // For Timer
-import 'package:gold_app/models/gold_price_latest_model.dart'; // For GoldPriceLatest
 
 enum ChartMode { costVsProfit, byShop }
 
@@ -85,7 +82,9 @@ class CalculatorPage extends StatefulWidget {
 }
 
 class CalculatorPageState extends State<CalculatorPage> {
-  final GoldApiService _apiService = GoldApiService();
+  final GoldDataRepository _repository = GoldDataRepository.instance;
+  GoldBoard? _lastAppliedSnapshot;
+  bool _itemsLoaded = false;
   final GlobalKey _bottomKey = GlobalKey();
   final List<CalculatorItem> _items = [];
   final NumberFormat _currencyFormat = NumberFormat("#,##0.00", "th_TH");
@@ -101,10 +100,6 @@ class CalculatorPageState extends State<CalculatorPage> {
   // Selective Screenshot
   bool _isSelectionMode = false;
   final Set<String> _selectedIds = {};
-
-  // Auto Reload
-  Timer? _timer;
-  GoldPriceLatest? _lastKnownPrice;
 
   Future<void> _captureAndShare() async {
     // 1. Premium Check Removed
@@ -319,52 +314,34 @@ class CalculatorPageState extends State<CalculatorPage> {
   @override
   void initState() {
     super.initState();
-    _loadItems();
-    // Initial fetch to set baseline price
-    _apiService.getLatestPrice().then((price) {
-      if (mounted) {
-        setState(() {
-          _lastKnownPrice = price;
-        });
-      }
+    _repository.addListener(_onRepositoryChanged);
+    _loadItems().then((_) {
+      _itemsLoaded = true;
+      final snapshot = _repository.snapshot;
+      if (snapshot != null) _applySnapshot(snapshot);
     });
-
-    // Start polling every 10 minutes (Silent fallback for price updates)
-    _timer = Timer.periodic(const Duration(minutes: 10), (timer) {
-      _checkForUpdates();
-    });
+    if (_repository.snapshot == null) {
+      _repository.refresh();
+    }
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _repository.removeListener(_onRepositoryChanged);
     _scrollController.dispose(); // Dispose controller
     super.dispose();
   }
 
-  Future<void> _checkForUpdates() async {
-    try {
-      final newPrice = await _apiService.getLatestPrice();
-      if (_lastKnownPrice != null) {
-        // Compare time/date/buy/sell to detect changes
-        if (newPrice.date != _lastKnownPrice!.date ||
-            newPrice.time != _lastKnownPrice!.time ||
-            newPrice.bullionBuy != _lastKnownPrice!.bullionBuy ||
-            newPrice.bullionSell != _lastKnownPrice!.bullionSell) {
-          if (mounted) {
-            setState(() {
-              _lastKnownPrice = newPrice;
-            });
-            // Price Changed -> Reload all calculator items silently
-            await _reloadAllPrices(silent: true);
-          }
-        }
-      } else {
-        _lastKnownPrice = newPrice;
-      }
-    } catch (e) {
-      debugPrint('Auto-reload check failed: $e');
-    }
+  void _onRepositoryChanged() {
+    final snapshot = _repository.snapshot;
+    if (!_itemsLoaded || snapshot == null) return;
+    _applySnapshot(snapshot);
+  }
+
+  void _applySnapshot(GoldBoard snapshot) {
+    if (!mounted || identical(snapshot, _lastAppliedSnapshot)) return;
+    _lastAppliedSnapshot = snapshot;
+    _reloadAllPrices(silent: true, boardSnapshot: snapshot);
   }
 
   Future<void> _loadItems() async {
@@ -731,6 +708,7 @@ class CalculatorPageState extends State<CalculatorPage> {
     String sourceType,
     String purity, {
     bool silent = false,
+    GoldBoard? boardSnapshot,
   }) async {
     bool isCancelled = false;
     bool dialogShown = false;
@@ -811,17 +789,20 @@ class CalculatorPageState extends State<CalculatorPage> {
 
       double? value;
       String updateTime = '';
+      final board = boardSnapshot ?? await _repository.refresh();
 
       if (sourceName == 'สมาคมค้าทองคำ') {
-        final price = await _apiService.getCurrentPrice();
+        final price = board.latest;
         String priceStr = sourceType == 'bar'
-            ? price.goldBarBuy
-            : price.goldOrnamentBuy;
+            ? price.bullionBuy
+            : price.ornamentBuy;
         value = double.tryParse(priceStr.replaceAll(',', ''));
-        updateTime = price.dateTime;
+        updateTime = board.updatedAt.isNotEmpty
+            ? board.updatedAt
+            : '${price.date} ${price.time}'.trim();
       } else {
         // Shop Price
-        final shops = await _apiService.getShopPrices();
+        final shops = board.shops;
         final shop = shops.firstWhere(
           (s) => s.name == sourceName,
           orElse: () => ShopPrice(
@@ -910,7 +891,10 @@ class CalculatorPageState extends State<CalculatorPage> {
     }
   }
 
-  Future<void> _reloadAllPrices({bool silent = false}) async {
+  Future<void> _reloadAllPrices({
+    bool silent = false,
+    GoldBoard? boardSnapshot,
+  }) async {
     if (!silent) {
       // Show global loading snackbar
       ScaffoldMessenger.of(context).showSnackBar(
@@ -938,6 +922,20 @@ class CalculatorPageState extends State<CalculatorPage> {
     int failedCount = 0;
     bool hasSourceItems = false;
 
+    GoldBoard board;
+    try {
+      board = boardSnapshot ?? await _repository.refresh();
+    } catch (e) {
+      if (!mounted) return;
+      if (!silent) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('อัปเดตข้อมูลไม่สำเร็จ: $e')));
+      }
+      return;
+    }
+
     // Filter indices first to avoid concurrent modification issues (though not modifying list here)
     for (int i = 0; i < _items.length; i++) {
       final item = _items[i];
@@ -950,6 +948,7 @@ class CalculatorPageState extends State<CalculatorPage> {
           item.sourceType!,
           item.purity ?? '96.5%',
           silent: true,
+          boardSnapshot: board,
         );
         if (success) {
           updatedCount++;
@@ -1116,7 +1115,9 @@ class CalculatorPageState extends State<CalculatorPage> {
                   // Source List
                   Expanded(
                     child: FutureBuilder<List<ShopPrice>>(
-                      future: _apiService.getShopPrices(),
+                      future: _repository.snapshot != null
+                          ? Future.value(_repository.snapshot!.shops)
+                          : _repository.refresh().then((board) => board.shops),
                       builder: (context, snapshot) {
                         if (snapshot.connectionState ==
                             ConnectionState.waiting) {

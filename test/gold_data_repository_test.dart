@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gold_app/models/gold_board_model.dart';
 import 'package:gold_app/models/gold_price_latest_model.dart';
 import 'package:gold_app/repositories/gold_data_repository.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('GoldBoard parses optional numeric and string revisions', () {
@@ -16,6 +17,7 @@ void main() {
     final completer = Completer<GoldBoard>();
     var calls = 0;
     final repository = GoldDataRepository(
+      enableCache: false,
       boardLoader: () {
         calls++;
         return completer.future;
@@ -33,6 +35,22 @@ void main() {
     await pumpEventQueue();
     expect(repository.snapshot, same(board));
     expect(repository.isRefreshing, isFalse);
+  });
+
+  test('repository persists and restores the latest snapshot', () async {
+    SharedPreferences.setMockInitialValues({});
+    final board = _board();
+    final writer = GoldDataRepository(boardLoader: () async => board);
+    await writer.refresh();
+
+    final reader = GoldDataRepository(
+      boardLoader: () => throw StateError('cache should load without network'),
+    );
+    await reader.initialize();
+
+    expect(reader.snapshot?.revision, 1);
+    expect(reader.snapshot?.latest.bullionBuy, '60000');
+    expect(reader.snapshot?.updatedAt, '2026-09-14T13:30:00+07:00');
   });
 }
 

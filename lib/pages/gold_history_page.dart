@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:gold_app/models/gold_price_model.dart';
-import 'package:gold_app/services/gold_api_service.dart';
+import 'package:gold_app/repositories/gold_data_repository.dart';
 import 'package:gold_app/widgets/main_layout_scaffold.dart';
 import 'package:gold_app/utils/ad_config.dart';
 import 'package:gold_app/widgets/banner_ad_with_close_button.dart';
@@ -14,8 +14,9 @@ class GoldHistoryPage extends StatefulWidget {
 }
 
 class GoldHistoryPageState extends State<GoldHistoryPage> {
-  final GoldApiService _apiService = GoldApiService();
+  final GoldDataRepository _repository = GoldDataRepository.instance;
   late Future<List<GoldPrice>> _goldPricesFuture;
+  Object? _lastSnapshot;
 
   // Reload Cooldown Logic
   int _cooldownSeconds = 0;
@@ -27,16 +28,33 @@ class GoldHistoryPageState extends State<GoldHistoryPage> {
   @override
   void initState() {
     super.initState();
-    _goldPricesFuture = _apiService.getLatestPrices();
+    final snapshot = _repository.snapshot;
+    _lastSnapshot = snapshot;
+    _goldPricesFuture = snapshot != null
+        ? Future.value(snapshot.history)
+        : _repository.refresh().then((board) => board.history);
+    _repository.addListener(_onRepositoryChanged);
     _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _repository.removeListener(_onRepositoryChanged);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onRepositoryChanged() {
+    final snapshot = _repository.snapshot;
+    if (!mounted || snapshot == null || identical(snapshot, _lastSnapshot)) {
+      return;
+    }
+    _lastSnapshot = snapshot;
+    setState(() {
+      _goldPricesFuture = Future.value(snapshot.history);
+    });
   }
 
   void _onScroll() {
@@ -90,9 +108,11 @@ class GoldHistoryPageState extends State<GoldHistoryPage> {
     if (_cooldownSeconds > 0) return;
 
     // Refresh Data
+    final refresh = _repository.refresh();
     setState(() {
-      _goldPricesFuture = _apiService.getLatestPrices();
+      _goldPricesFuture = refresh.then((board) => board.history);
     });
+    await refresh;
 
     // Start Cooldown
     _startCooldown();
@@ -259,7 +279,9 @@ class GoldHistoryPageState extends State<GoldHistoryPage> {
                   ElevatedButton(
                     onPressed: () {
                       setState(() {
-                        _goldPricesFuture = _apiService.getLatestPrices();
+                        _goldPricesFuture = _repository.refresh().then(
+                          (board) => board.history,
+                        );
                       });
                     },
                     child: const Text('ลองใหม่'),

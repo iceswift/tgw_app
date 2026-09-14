@@ -17,6 +17,7 @@ import 'package:gold_app/services/fcm_service.dart'; // FCM Service
 import 'package:firebase_core/firebase_core.dart'; // Firebase Core
 import 'package:firebase_messaging/firebase_messaging.dart'; // Firebase Messaging
 import 'package:gold_app/pages/privacy_consent_page.dart';
+import 'package:gold_app/repositories/gold_data_repository.dart';
 import 'package:intl/date_symbol_data_local.dart'; // Import for date formatting
 import 'dart:ui';
 
@@ -45,6 +46,7 @@ void main() async {
 
   // Load Settings (Await for PIN state)
   await SettingsController().loadSettings();
+  await GoldDataRepository.instance.initialize();
 
   // Check Terms Acceptance
   final prefs = await SharedPreferences.getInstance();
@@ -489,8 +491,8 @@ class _GoldHomePageState extends State<GoldHomePage> {
 class AppScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {
-        PointerDeviceKind.touch,
-        PointerDeviceKind.mouse,
-        PointerDeviceKind.trackpad,
-      };
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.trackpad,
+  };
 }

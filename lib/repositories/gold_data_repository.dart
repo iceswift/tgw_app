@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:gold_app/models/gold_board_model.dart';
 import 'package:gold_app/services/gold_api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 typedef GoldBoardLoader = Future<GoldBoard> Function();
 
@@ -11,14 +14,21 @@ typedef GoldBoardLoader = Future<GoldBoard> Function();
 /// be absent. Cache persistence and lifecycle/FCM wiring are added in later
 /// phases.
 class GoldDataRepository extends ChangeNotifier {
-  GoldDataRepository({GoldApiService? apiService, GoldBoardLoader? boardLoader})
-    : _apiService = apiService ?? GoldApiService(),
-      _boardLoader = boardLoader;
+  GoldDataRepository({
+    GoldApiService? apiService,
+    GoldBoardLoader? boardLoader,
+    bool enableCache = true,
+  }) : _apiService = apiService ?? GoldApiService(),
+       _boardLoader = boardLoader,
+       _enableCache = enableCache;
 
   static final GoldDataRepository instance = GoldDataRepository();
 
   final GoldApiService _apiService;
   final GoldBoardLoader? _boardLoader;
+  final bool _enableCache;
+
+  static const String _cacheKey = 'gold_board_snapshot_v1';
 
   GoldBoard? _snapshot;
   Future<GoldBoard>? _refreshInFlight;
@@ -29,6 +39,21 @@ class GoldDataRepository extends ChangeNotifier {
   Object? get lastError => _lastError;
   bool get isRefreshing => _isRefreshing;
 
+  Future<void> initialize() async {
+    if (!_enableCache || _snapshot != null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedJson = prefs.getString(_cacheKey);
+      if (cachedJson == null) return;
+      _snapshot = GoldBoard.fromJson(
+        jsonDecode(cachedJson) as Map<String, dynamic>,
+      );
+      notifyListeners();
+    } catch (error) {
+      debugPrint('Unable to restore gold snapshot cache: $error');
+    }
+  }
+
   Future<GoldBoard> refresh() {
     final activeRefresh = _refreshInFlight;
     if (activeRefresh != null) return activeRefresh;
@@ -37,7 +62,7 @@ class GoldDataRepository extends ChangeNotifier {
     _lastError = null;
     notifyListeners();
 
-    final refresh = _loadSnapshot();
+    final refresh = _refreshAndCache();
     _refreshInFlight = refresh;
 
     refresh
@@ -54,6 +79,20 @@ class GoldDataRepository extends ChangeNotifier {
         });
 
     return refresh;
+  }
+
+  Future<GoldBoard> _refreshAndCache() async {
+    final board = await _loadSnapshot();
+    _snapshot = board;
+    if (_enableCache) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_cacheKey, jsonEncode(board.toJson()));
+      } catch (error) {
+        debugPrint('Unable to persist gold snapshot cache: $error');
+      }
+    }
+    return board;
   }
 
   Future<bool> refreshIfChanged() async {

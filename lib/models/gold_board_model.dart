@@ -70,4 +70,75 @@ class GoldBoard {
     if (value is int) return value;
     return int.tryParse(value?.toString() ?? '');
   }
+
+  Map<String, dynamic> toJson() => {
+    if (revision != null) 'revision': revision,
+    'status': status,
+    'source': source,
+    'market_status': marketStatus,
+    'updated_at': updatedAt,
+    'stale': stale,
+    'age_seconds': ageSeconds,
+    'latest': {
+      'date': latest.date,
+      'time': latest.time,
+      'round': latest.round,
+      'bullion_buy': latest.bullionBuy,
+      'bullion_sell': latest.bullionSell,
+      'ornament_buy': latest.ornamentBuy,
+      'ornament_sell': latest.ornamentSell,
+      'gold_spot': latest.spot,
+      'thb': latest.thb,
+      'change': latest.change,
+    },
+    'history': history.map((item) {
+      final separator = item.dateTime.lastIndexOf(' ');
+      return {
+        'date': separator < 0
+            ? item.dateTime
+            : item.dateTime.substring(0, separator),
+        'time': separator < 0 ? '' : item.dateTime.substring(separator + 1),
+        'round': item.no,
+        'bullion_buy': item.goldBarBuy,
+        'bullion_sell': item.goldBarSell,
+        'ornament_buy': item.goldOrnamentBuy,
+        'ornament_sell': item.goldOrnamentSell,
+        'gold_spot': item.spot,
+        'thb': item.thb,
+        'change': item.change,
+      };
+    }).toList(),
+    'jewelry': jewelry
+        .map(
+          (item) => {
+            'type': item.type,
+            'per_gram_buy': item.perGramBuy,
+            'per_baht_buy': item.perBahtBuy,
+            'per_baht_sell': item.perBahtSell,
+          },
+        )
+        .toList(),
+    'shops': shops
+        .map(
+          (shop) => {
+            'name': shop.name,
+            'data': {
+              if (shop.goldBar965 != null)
+                'gold_bar_965': _shopDataToJson(shop.goldBar965!),
+              if (shop.goldBar9999 != null)
+                'gold_bar_9999': _shopDataToJson(shop.goldBar9999!),
+              if (shop.ornament965 != null)
+                'ornament_965': _shopDataToJson(shop.ornament965!),
+              if (shop.ornamentBuyBack != null)
+                'ornament_buy_back': _shopDataToJson(shop.ornamentBuyBack!),
+            },
+          },
+        )
+        .toList(),
+  };
+
+  static Map<String, dynamic> _shopDataToJson(ShopGoldData data) => {
+    'buy': data.buy,
+    'sell': data.sell,
+  };
 }
