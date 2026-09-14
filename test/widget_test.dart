@@ -1,30 +1,26 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:gold_app/main.dart';
+import 'package:gold_app/models/gold_price_latest_model.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp(isTermsAccepted: true));
+  test('latest gold price model parses the API response shape', () {
+    final price = GoldPriceLatest.fromJson({
+      'market_status': 'open',
+      'data': {
+        'date': '2026-09-14',
+        'time': '13:30',
+        'no': '1',
+        'bullion_buy': '60,000',
+        'bullion_sell': '60,100',
+        'ornament_buy': '58,912.12',
+        'ornament_sell': '60,900',
+        'spot': '2,500',
+        'thb': '32.00',
+        'change': '+100',
+      },
+    });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(price.marketStatus, 'open');
+    expect(price.bullionBuy, '60,000');
+    expect(price.bullionSell, '60,100');
   });
 }

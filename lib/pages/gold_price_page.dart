@@ -3,17 +3,18 @@ import 'package:gold_app/utils/ad_config.dart';
 import 'package:flutter/material.dart';
 
 import 'package:gold_app/models/gold_price_latest_model.dart';
+import 'package:gold_app/models/gold_board_model.dart';
 import 'package:flutter/foundation.dart';
 import 'package:gold_app/utils/image_saver_web.dart';
 import 'package:gold_app/models/jewelry_price_model.dart';
 import 'package:intl/intl.dart';
 
-import 'package:gold_app/services/gold_api_service.dart';
 import 'package:gold_app/widgets/main_layout_scaffold.dart';
 import 'package:shimmer/shimmer.dart';
 
 import 'package:gold_app/models/shop_price_model.dart';
-import 'package:gold_app/models/gold_price_model.dart'; 
+import 'package:gold_app/models/gold_price_model.dart';
+import 'package:gold_app/repositories/gold_data_repository.dart';
 import 'package:gold_app/widgets/daily_price_graph.dart';
 import 'package:gold_app/services/widget_service.dart'; // Import WidgetService
 import 'package:screenshot/screenshot.dart';
@@ -30,7 +31,7 @@ class GoldPricePage extends StatefulWidget {
 }
 
 class GoldPricePageState extends State<GoldPricePage> {
-  final GoldApiService _apiService = GoldApiService();
+  final GoldDataRepository _repository = GoldDataRepository.instance;
   final WidgetService _widgetService = WidgetService();
   final ScrollController _scrollController =
       ScrollController(); // Added Controller // Initialize WidgetService
@@ -156,8 +157,11 @@ class GoldPricePageState extends State<GoldPricePage> {
   }
 
   void _loadData() {
-    // Primary: Fetch consolidated data from /api/board
-    final boardFuture = _apiService.getBoard().then((board) {
+    _bindBoardFuture(_repository.refresh());
+  }
+
+  void _bindBoardFuture(Future<GoldBoard> boardFuture) {
+    final observedBoardFuture = boardFuture.then((board) {
       if (mounted) {
         setState(() {
           _isBoardStale = board.stale;
@@ -167,57 +171,33 @@ class GoldPricePageState extends State<GoldPricePage> {
     });
 
     setState(() {
-      _mainPriceFuture = boardFuture.then((board) {
+      _mainPriceFuture = observedBoardFuture.then((board) {
         _lastKnownPrice = board.latest;
         _widgetService.updateWidget(board.latest);
         return board.latest;
-      }).catchError((e) {
-        debugPrint('Board loading failed, falling back to individual endpoints: $e');
-        if (mounted) {
-          setState(() {
-            _isBoardStale = false; // Reset on fallback
-          });
-        }
-        // Fallback: Individual endpoint
-        return _apiService.getLatestPrice().then((data) {
-          _lastKnownPrice = data;
-          _widgetService.updateWidget(data);
-          return data;
-        });
       });
 
-      _jewelryFuture = boardFuture.then((board) => board.jewelry).catchError((e) {
-        return _apiService.getJewelryPrices();
-      });
+      _jewelryFuture = observedBoardFuture.then((board) => board.jewelry);
 
-      _shopFuture = boardFuture.then((board) => board.shops).catchError((e) {
-        return _apiService.getShopPrices();
-      });
+      _shopFuture = observedBoardFuture.then((board) => board.shops);
 
-      _historyFuture = boardFuture.then((board) => board.history).catchError((e) {
-        return _apiService.getLatestPrices();
-      });
+      _historyFuture = observedBoardFuture.then((board) => board.history);
     });
   }
 
   Future<void> _checkForUpdates() async {
     try {
-      final newPrice = await _apiService.getLatestPrice();
+      final isChanged = await _repository.refreshIfChanged();
+      final board = _repository.snapshot;
+      final newPrice = board?.latest;
 
-      if (_lastKnownPrice != null) {
-        // Compare essential fields to detect change
-        final isChanged =
-            newPrice.date != _lastKnownPrice!.date ||
-            newPrice.time != _lastKnownPrice!.time ||
-            newPrice.bullionBuy != _lastKnownPrice!.bullionBuy ||
-            newPrice.bullionSell != _lastKnownPrice!.bullionSell;
-
+      if (_lastKnownPrice != null && newPrice != null) {
         if (isChanged) {
           // Update last known price
           _lastKnownPrice = newPrice;
 
-          // Refresh UI
-          _loadData();
+          // Rebind UI futures without issuing a second network request.
+          _bindBoardFuture(Future.value(board!));
 
           // Update Widget
           _widgetService.updateWidget(newPrice);
@@ -262,7 +242,7 @@ class GoldPricePageState extends State<GoldPricePage> {
             );
           }
         }
-      } else {
+      } else if (newPrice != null) {
         // First time load fallback
         _lastKnownPrice = newPrice;
       }
@@ -1301,13 +1281,7 @@ class GoldPricePageState extends State<GoldPricePage> {
                 ),
               ),
               onPressed: () {
-                setState(() {
-                  if (isMain) {
-                    _mainPriceFuture = _apiService.getLatestPrice();
-                  } else {
-                    _jewelryFuture = _apiService.getJewelryPrices();
-                  }
-                });
+                _loadData();
               },
               child: const Text('ลองใหม่'),
             ),

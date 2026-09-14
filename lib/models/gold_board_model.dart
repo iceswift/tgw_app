@@ -4,6 +4,7 @@ import 'package:gold_app/models/jewelry_price_model.dart';
 import 'package:gold_app/models/shop_price_model.dart';
 
 class GoldBoard {
+  final int? revision;
   final String status;
   final String source;
   final String marketStatus;
@@ -16,6 +17,7 @@ class GoldBoard {
   final List<ShopPrice> shops;
 
   GoldBoard({
+    this.revision,
     required this.status,
     required this.source,
     required this.marketStatus,
@@ -30,7 +32,7 @@ class GoldBoard {
 
   factory GoldBoard.fromJson(Map<String, dynamic> json) {
     final latestData = json['latest'] as Map<String, dynamic>? ?? {};
-    
+
     // Simulate the structure GoldPriceLatest.fromJson expects
     final simulatedLatestJson = {
       'market_status': json['market_status'] ?? '',
@@ -38,6 +40,7 @@ class GoldBoard {
     };
 
     return GoldBoard(
+      revision: _parseRevision(json['revision']),
       status: json['status'] ?? '',
       source: json['source'] ?? '',
       marketStatus: json['market_status'] ?? '',
@@ -61,5 +64,10 @@ class GoldBoard {
           .map((e) => ShopPrice.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
+  }
+
+  static int? _parseRevision(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
   }
 }
