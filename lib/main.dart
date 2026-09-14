@@ -16,6 +16,7 @@ import 'package:gold_app/services/background_service.dart';
 import 'package:gold_app/services/fcm_service.dart'; // FCM Service
 import 'package:firebase_core/firebase_core.dart'; // Firebase Core
 import 'package:firebase_messaging/firebase_messaging.dart'; // Firebase Messaging
+import 'package:gold_app/config/firebase_web_config.dart';
 import 'package:gold_app/pages/privacy_consent_page.dart';
 import 'package:gold_app/repositories/gold_data_repository.dart';
 import 'package:intl/date_symbol_data_local.dart'; // Import for date formatting
@@ -23,7 +24,12 @@ import 'dart:ui';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!kIsWeb) {
+  if (kIsWeb) {
+    if (FirebaseWebConfig.firebaseReady) {
+      await Firebase.initializeApp(options: FirebaseWebConfig.options);
+      await FCMService.initialize();
+    }
+  } else {
     // Initialize Firebase
     await Firebase.initializeApp();
 

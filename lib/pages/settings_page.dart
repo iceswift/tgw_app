@@ -6,6 +6,8 @@ import 'package:gold_app/utils/ad_config.dart';
 import 'package:gold_app/pages/terms_privacy_page.dart';
 import 'package:gold_app/pages/pin_code_page.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
+import 'package:gold_app/services/fcm_service.dart';
 
 class SettingsPage extends StatelessWidget {
   final SettingsController controller;
@@ -124,6 +126,15 @@ class SettingsPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 24),
+          if (kIsWeb) ...[
+            _buildSectionHeader(context, 'การแจ้งเตือน'),
+            const SizedBox(height: 12),
+            _buildSettingsCard(
+              context,
+              children: const [_WebNotificationSetting()],
+            ),
+            const SizedBox(height: 24),
+          ],
           _buildSectionHeader(context, 'เกี่ยวกับ'),
           const SizedBox(height: 12),
           _buildSettingsCard(
@@ -459,6 +470,84 @@ class SettingsPage extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _WebNotificationSetting extends StatefulWidget {
+  const _WebNotificationSetting();
+
+  @override
+  State<_WebNotificationSetting> createState() =>
+      _WebNotificationSettingState();
+}
+
+class _WebNotificationSettingState extends State<_WebNotificationSetting> {
+  bool _working = false;
+  String _message = 'รับการแจ้งเตือนเมื่อราคาทองเปลี่ยน';
+
+  Future<void> _enable() async {
+    setState(() => _working = true);
+    final result = await FCMService.enableWebNotifications();
+    if (!mounted) return;
+    setState(() {
+      _working = false;
+      _message = switch (result) {
+        WebNotificationResult.enabled => 'เปิดการแจ้งเตือนแล้ว',
+        WebNotificationResult.denied =>
+          'เบราว์เซอร์ปฏิเสธสิทธิ์ กรุณาเปิดสิทธิ์ในการตั้งค่าเว็บไซต์',
+        WebNotificationResult.notConfigured =>
+          'ระบบแจ้งเตือนเว็บยังรอการตั้งค่าจากผู้ดูแล',
+        WebNotificationResult.unsupported =>
+          'อุปกรณ์นี้ไม่รองรับการแจ้งเตือนเว็บ',
+        WebNotificationResult.failed =>
+          'เปิดการแจ้งเตือนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+      };
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.notifications_active_outlined,
+            color: Color(0xFFD4AF37),
+            size: 28,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'แจ้งเตือนราคาทอง',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.grey[200] : Colors.grey[800],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(_message, style: const TextStyle(fontSize: 12)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.tonal(
+            onPressed: _working ? null : _enable,
+            child: _working
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('เปิดใช้งาน'),
+          ),
+        ],
+      ),
     );
   }
 }
