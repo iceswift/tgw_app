@@ -174,6 +174,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.initState();
     _isTermsAccepted = widget.isTermsAccepted; // Initialize state from prop
     WidgetsBinding.instance.addObserver(this); // Observe App Lifecycle
+    GoldDataRepository.instance.startPolling();
     _settingsController.addListener(() {
       setState(() {});
     });
@@ -182,6 +183,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    GoldDataRepository.instance.stopPolling();
     super.dispose();
   }
 
@@ -190,6 +192,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // Lock when app goes to background (paused)
     if (state == AppLifecycleState.paused) {
       _settingsController.lockApp();
+    } else if (state == AppLifecycleState.resumed) {
+      GoldDataRepository.instance.refreshIfStale(const Duration(minutes: 2));
     }
   }
 

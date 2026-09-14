@@ -18,6 +18,7 @@ void main() {
     var calls = 0;
     final repository = GoldDataRepository(
       enableCache: false,
+      updateHomeWidget: false,
       boardLoader: () {
         calls++;
         return completer.future;
@@ -40,17 +41,38 @@ void main() {
   test('repository persists and restores the latest snapshot', () async {
     SharedPreferences.setMockInitialValues({});
     final board = _board();
-    final writer = GoldDataRepository(boardLoader: () async => board);
+    final writer = GoldDataRepository(
+      boardLoader: () async => board,
+      updateHomeWidget: false,
+    );
     await writer.refresh();
 
     final reader = GoldDataRepository(
       boardLoader: () => throw StateError('cache should load without network'),
+      updateHomeWidget: false,
     );
     await reader.initialize();
 
     expect(reader.snapshot?.revision, 1);
     expect(reader.snapshot?.latest.bullionBuy, '60000');
     expect(reader.snapshot?.updatedAt, '2026-09-14T13:30:00+07:00');
+  });
+
+  test('repository ignores an FCM revision that is not newer', () async {
+    var calls = 0;
+    final repository = GoldDataRepository(
+      enableCache: false,
+      updateHomeWidget: false,
+      boardLoader: () async {
+        calls++;
+        return _board();
+      },
+    );
+
+    await repository.refresh();
+    expect(await repository.refreshForRevision(1), isFalse);
+    expect(await repository.refreshForRevision(0), isFalse);
+    expect(calls, 1);
   });
 }
 

@@ -1,8 +1,9 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:gold_app/services/widget_service.dart';
-import 'package:gold_app/services/gold_api_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:gold_app/repositories/gold_data_repository.dart';
 
 class FCMService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
@@ -28,39 +29,45 @@ class FCMService {
     // 3. Handle Foreground Messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       if (kDebugMode) {
-        print('FCM: Received foreground message: ${message.notification?.title}');
+        print(
+          'FCM: Received foreground message: ${message.notification?.title}',
+        );
         print('FCM: Data payload: ${message.data}');
       }
-      _handleMessage(message);
+      unawaited(_handleMessage(message));
     });
 
     // 4. Handle Background/Terminated Messages (App opened from notification)
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       if (kDebugMode) {
-        print('FCM: App opened from notification: ${message.notification?.title}');
+        print(
+          'FCM: App opened from notification: ${message.notification?.title}',
+        );
       }
-      // Usually updates are already handled by background handler, 
+      // Usually updates are already handled by background handler,
       // but we can trigger a refresh if needed when app opens.
-      _handleMessage(message);
+      unawaited(_handleMessage(message));
     });
+
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      await _handleMessage(initialMessage);
+    }
   }
 
-  static void _handleMessage(RemoteMessage message) async {
-    // When a message is received (via topic gold_price_updates), 
-    // fetch latest price and update the home widget.
+  static Future<void> _handleMessage(RemoteMessage message) async {
     try {
       if (kDebugMode) {
-        print('FCM: Fetching latest price for widget update...');
+        print('FCM: Refreshing the shared gold snapshot...');
       }
-      
-      final apiService = GoldApiService();
-      final latestPrice = await apiService.getLatestPrice();
 
-      // Update Widget
-      await WidgetService().updateWidget(latestPrice);
+      final revision = int.tryParse(message.data['revision']?.toString() ?? '');
+      final refreshed = await GoldDataRepository.instance.refreshForRevision(
+        revision,
+      );
 
       if (kDebugMode) {
-        print('FCM: Home widget updated successfully with latest price: ${latestPrice.bullionBuy}');
+        print('FCM: Shared snapshot refresh requested: $refreshed');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -81,14 +88,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     print("FCM: Topic: ${message.from}");
   }
 
-  // Update Widget in background
   try {
-    final apiService = GoldApiService();
-    final latestPrice = await apiService.getLatestPrice();
-    await WidgetService().updateWidget(latestPrice);
-    
+    final repository = GoldDataRepository();
+    await repository.initialize();
+    final revision = int.tryParse(message.data['revision']?.toString() ?? '');
+    await repository.refreshForRevision(revision);
+
     if (kDebugMode) {
-      print("FCM: Background widget update complete.");
+      print("FCM: Background snapshot update complete.");
     }
   } catch (e) {
     if (kDebugMode) {

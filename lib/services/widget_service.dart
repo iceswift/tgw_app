@@ -8,8 +8,8 @@ class WidgetService {
   static const String androidWidgetName =
       'com.thaigoldview.app.GoldWidgetProvider'; // FQN
 
-  Future<void> updateWidget(GoldPriceLatest data) async {
-    if (kIsWeb) return;
+  Future<bool> updateWidget(GoldPriceLatest data) async {
+    if (kIsWeb) return false;
     // Format numbers
     final formatter = NumberFormat("#,###");
 
@@ -19,33 +19,31 @@ class WidgetService {
       return v != null ? formatter.format(v) : val;
     }
 
-    // Save data (Stable Set)
-    await HomeWidget.saveWidgetData<String>(
-      'bullion_buy',
-      fmt(data.bullionBuy),
-    );
-    await HomeWidget.saveWidgetData<String>(
-      'bullion_sell',
-      fmt(data.bullionSell),
-    );
-    await HomeWidget.saveWidgetData<String>(
-      'ornament_buy',
-      fmt(data.ornamentBuy),
-    );
-    await HomeWidget.saveWidgetData<String>(
-      'ornament_sell',
-      fmt(data.ornamentSell),
-    );
-    await HomeWidget.saveWidgetData<String>('change', data.change);
-    await HomeWidget.saveWidgetData<String>(
-      'date',
-      '${data.date} ${data.time}',
-    );
+    final values = <String, String>{
+      'bullion_buy': fmt(data.bullionBuy),
+      'bullion_sell': fmt(data.bullionSell),
+      'ornament_buy': fmt(data.ornamentBuy),
+      'ornament_sell': fmt(data.ornamentSell),
+      'change': data.change,
+      'date': '${data.date} ${data.time}',
+    };
+
+    var changed = false;
+    for (final entry in values.entries) {
+      final previous = await HomeWidget.getWidgetData<String>(entry.key);
+      if (previous != entry.value) changed = true;
+    }
+    if (!changed) return false;
+
+    for (final entry in values.entries) {
+      await HomeWidget.saveWidgetData<String>(entry.key, entry.value);
+    }
 
     // Update the widget
     await HomeWidget.updateWidget(
       name: androidWidgetName,
       androidName: androidWidgetName,
     );
+    return true;
   }
 }

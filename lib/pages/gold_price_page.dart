@@ -16,7 +16,6 @@ import 'package:gold_app/models/shop_price_model.dart';
 import 'package:gold_app/models/gold_price_model.dart';
 import 'package:gold_app/repositories/gold_data_repository.dart';
 import 'package:gold_app/widgets/daily_price_graph.dart';
-import 'package:gold_app/services/widget_service.dart'; // Import WidgetService
 import 'package:screenshot/screenshot.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
@@ -33,7 +32,6 @@ class GoldPricePage extends StatefulWidget {
 class GoldPricePageState extends State<GoldPricePage> {
   final GoldDataRepository _repository = GoldDataRepository.instance;
   GoldBoard? _lastBoundSnapshot;
-  final WidgetService _widgetService = WidgetService();
   final ScrollController _scrollController =
       ScrollController(); // Added Controller // Initialize WidgetService
   late Future<GoldPriceLatest> _mainPriceFuture;
@@ -41,9 +39,6 @@ class GoldPricePageState extends State<GoldPricePage> {
   late Future<List<ShopPrice>> _shopFuture;
   late Future<List<GoldPrice>> _historyFuture; // Add History Future
 
-  // Polling variables
-  Timer? _timer;
-  GoldPriceLatest? _lastKnownPrice;
   bool _isBoardStale = false; // Flag for stale data from board API
 
   // Refresh Cooldown Logic
@@ -144,16 +139,11 @@ class GoldPricePageState extends State<GoldPricePage> {
     } else {
       _loadData();
     }
-    // Start polling every 10 minutes (Silent fallback)
-    _timer = Timer.periodic(const Duration(minutes: 10), (timer) {
-      _checkForUpdates();
-    });
   }
 
   @override
   void dispose() {
     _repository.removeListener(_onRepositoryChanged);
-    _timer?.cancel();
     _cooldownTimer?.cancel();
     super.dispose();
   }
@@ -201,8 +191,6 @@ class GoldPricePageState extends State<GoldPricePage> {
 
     setState(() {
       _mainPriceFuture = observedBoardFuture.then((board) {
-        _lastKnownPrice = board.latest;
-        _widgetService.updateWidget(board.latest);
         return board.latest;
       });
 
@@ -212,73 +200,6 @@ class GoldPricePageState extends State<GoldPricePage> {
 
       _historyFuture = observedBoardFuture.then((board) => board.history);
     });
-  }
-
-  Future<void> _checkForUpdates() async {
-    try {
-      final isChanged = await _repository.refreshIfChanged();
-      final board = _repository.snapshot;
-      final newPrice = board?.latest;
-
-      if (_lastKnownPrice != null && newPrice != null) {
-        if (isChanged) {
-          // Update last known price
-          _lastKnownPrice = newPrice;
-
-          // Rebind UI futures without issuing a second network request.
-          _bindBoardFuture(Future.value(board!));
-
-          // Update Widget
-          _widgetService.updateWidget(newPrice);
-
-          // Show Notification
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Row(
-                  children: [
-                    const Icon(Icons.notifications_active, color: Colors.white),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'ราคาเปลี่ยนแปลง!',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          Text(
-                            'เวลา ${newPrice.time} น.',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                backgroundColor: Colors.green[700],
-                behavior: SnackBarBehavior.floating, // Floating style
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                margin: const EdgeInsets.all(16),
-                duration: const Duration(seconds: 4),
-              ),
-            );
-          }
-        }
-      } else if (newPrice != null) {
-        // First time load fallback
-        _lastKnownPrice = newPrice;
-      }
-    } catch (e) {
-      // Silent error on background check
-      debugPrint('Error checking for updates: $e');
-    }
   }
 
   Future<void> _refresh() async {
