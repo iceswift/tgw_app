@@ -32,7 +32,9 @@ class GoldHistoryPageState extends State<GoldHistoryPage> {
     _lastSnapshot = snapshot;
     _goldPricesFuture = snapshot != null
         ? Future.value(snapshot.history)
-        : _repository.refresh().then((board) => board.history);
+        : _repository
+              .refresh(reason: GoldRefreshReason.startup)
+              .then((board) => board.history);
     _repository.addListener(_onRepositoryChanged);
     _scrollController.addListener(_onScroll);
   }

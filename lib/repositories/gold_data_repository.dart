@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 typedef GoldBoardLoader = Future<GoldBoard> Function();
 
+enum GoldRefreshReason { startup, manual, polling, resume, push, background }
+
 /// Single source of truth for the current gold-data snapshot.
 ///
 /// The repository prefers `/api/board`, deduplicates concurrent refreshes and
@@ -35,6 +37,7 @@ class GoldDataRepository extends ChangeNotifier {
 
   static const String _cacheKey = 'gold_board_snapshot_v1';
   static const String _cacheSavedAtKey = 'gold_board_snapshot_saved_at_v1';
+  static const String _etagKey = 'gold_board_etag_v1';
 
   GoldBoard? _snapshot;
   Future<GoldBoard>? _refreshInFlight;
@@ -42,11 +45,18 @@ class GoldDataRepository extends ChangeNotifier {
   bool _isRefreshing = false;
   DateTime? _lastSuccessfulRefreshAt;
   Timer? _pollingTimer;
+  String? _etag;
+  GoldRefreshReason? _lastRefreshReason;
+  final Map<GoldRefreshReason, int> _refreshCounts = {};
 
   GoldBoard? get snapshot => _snapshot;
   Object? get lastError => _lastError;
   bool get isRefreshing => _isRefreshing;
   DateTime? get lastSuccessfulRefreshAt => _lastSuccessfulRefreshAt;
+  String? get etag => _etag;
+  GoldRefreshReason? get lastRefreshReason => _lastRefreshReason;
+  Map<GoldRefreshReason, int> get refreshCounts =>
+      Map.unmodifiable(_refreshCounts);
 
   Future<void> initialize() async {
     if (!_enableCache || _snapshot != null) return;
@@ -60,6 +70,7 @@ class GoldDataRepository extends ChangeNotifier {
       _lastSuccessfulRefreshAt = DateTime.tryParse(
         prefs.getString(_cacheSavedAtKey) ?? '',
       );
+      _etag = prefs.getString(_etagKey);
       notifyListeners();
     } catch (error) {
       debugPrint('Unable to restore gold snapshot cache: $error');
@@ -69,7 +80,7 @@ class GoldDataRepository extends ChangeNotifier {
   void startPolling({Duration interval = const Duration(minutes: 15)}) {
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(interval, (_) {
-      unawaited(refreshIfStale(interval));
+      unawaited(refreshIfStale(interval, reason: GoldRefreshReason.polling));
     });
   }
 
@@ -78,13 +89,16 @@ class GoldDataRepository extends ChangeNotifier {
     _pollingTimer = null;
   }
 
-  Future<bool> refreshIfStale(Duration maxAge) async {
+  Future<bool> refreshIfStale(
+    Duration maxAge, {
+    GoldRefreshReason reason = GoldRefreshReason.manual,
+  }) async {
     final refreshedAt = _lastSuccessfulRefreshAt;
     if (refreshedAt != null &&
         DateTime.now().difference(refreshedAt) < maxAge) {
       return false;
     }
-    await refresh();
+    await refresh(reason: reason);
     return true;
   }
 
@@ -95,17 +109,22 @@ class GoldDataRepository extends ChangeNotifier {
         incomingRevision <= currentRevision) {
       return false;
     }
-    await refresh();
+    await refresh(reason: GoldRefreshReason.push);
     return true;
   }
 
-  Future<GoldBoard> refresh() {
+  Future<GoldBoard> refresh({
+    GoldRefreshReason reason = GoldRefreshReason.manual,
+  }) {
     final activeRefresh = _refreshInFlight;
     if (activeRefresh != null) return activeRefresh;
 
+    _lastRefreshReason = reason;
+    _refreshCounts.update(reason, (count) => count + 1, ifAbsent: () => 1);
     _isRefreshing = true;
     _lastError = null;
     notifyListeners();
+    debugPrint('Gold snapshot refresh started: ${reason.name}');
 
     final refresh = _refreshAndCache();
     _refreshInFlight = refresh;
@@ -116,6 +135,7 @@ class GoldDataRepository extends ChangeNotifier {
         })
         .catchError((Object error) {
           _lastError = error;
+          debugPrint('Gold snapshot refresh failed (${reason.name}): $error');
         })
         .whenComplete(() {
           _isRefreshing = false;
@@ -127,10 +147,20 @@ class GoldDataRepository extends ChangeNotifier {
   }
 
   Future<GoldBoard> _refreshAndCache() async {
-    final board = await _loadSnapshot();
-    _snapshot = board;
+    final result = await _loadSnapshot();
+    final previous = _snapshot;
+    final board = result.board;
+    _etag = result.etag ?? _etag;
     _lastSuccessfulRefreshAt = DateTime.now();
-    if (_updateHomeWidget) {
+
+    final unchangedRevision =
+        previous?.revision != null &&
+        board.revision != null &&
+        previous!.revision == board.revision;
+    final changed = !result.notModified && !unchangedRevision;
+    if (changed) _snapshot = board;
+
+    if (changed && _updateHomeWidget) {
       try {
         await WidgetService().updateWidget(board.latest);
       } catch (error) {
@@ -140,16 +170,27 @@ class GoldDataRepository extends ChangeNotifier {
     if (_enableCache) {
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_cacheKey, jsonEncode(board.toJson()));
+        if (changed) {
+          await prefs.setString(_cacheKey, jsonEncode(board.toJson()));
+        }
         await prefs.setString(
           _cacheSavedAtKey,
           _lastSuccessfulRefreshAt!.toIso8601String(),
         );
+        if (_etag != null) await prefs.setString(_etagKey, _etag!);
       } catch (error) {
         debugPrint('Unable to persist gold snapshot cache: $error');
       }
     }
-    return board;
+    debugPrint(
+      'Gold snapshot refresh completed: '
+      '${result.notModified
+          ? 'not-modified'
+          : changed
+          ? 'updated'
+          : 'same-revision'}',
+    );
+    return _snapshot ?? board;
   }
 
   Future<bool> refreshIfChanged() async {
@@ -170,11 +211,24 @@ class GoldDataRepository extends ChangeNotifier {
     return changed;
   }
 
-  Future<GoldBoard> _loadSnapshot() async {
-    if (_boardLoader != null) return _boardLoader();
+  Future<_BoardLoadResult> _loadSnapshot() async {
+    if (_boardLoader != null) {
+      return _BoardLoadResult(board: await _boardLoader());
+    }
 
     try {
-      return await _apiService.getBoard();
+      var response = await _apiService.getBoardResponse(etag: _etag);
+      if (response.notModified && _snapshot == null) {
+        response = await _apiService.getBoardResponse();
+      }
+      if (response.notModified) {
+        return _BoardLoadResult(
+          board: _snapshot!,
+          etag: response.etag,
+          notModified: true,
+        );
+      }
+      return _BoardLoadResult(board: response.board!, etag: response.etag);
     } catch (boardError) {
       debugPrint(
         'Board loading failed, falling back to individual endpoints: '
@@ -189,18 +243,32 @@ class GoldDataRepository extends ChangeNotifier {
       ]);
       final latest = results[0];
 
-      return GoldBoard(
-        status: 'fallback',
-        source: 'individual_endpoints',
-        marketStatus: latest.marketStatus,
-        updatedAt: '${latest.date} ${latest.time}'.trim(),
-        stale: false,
-        ageSeconds: 0,
-        latest: latest,
-        history: results[1],
-        jewelry: results[2],
-        shops: results[3],
+      return _BoardLoadResult(
+        board: GoldBoard(
+          status: 'fallback',
+          source: 'individual_endpoints',
+          marketStatus: latest.marketStatus,
+          updatedAt: '${latest.date} ${latest.time}'.trim(),
+          stale: false,
+          ageSeconds: 0,
+          latest: latest,
+          history: results[1],
+          jewelry: results[2],
+          shops: results[3],
+        ),
       );
     }
   }
+}
+
+class _BoardLoadResult {
+  const _BoardLoadResult({
+    required this.board,
+    this.etag,
+    this.notModified = false,
+  });
+
+  final GoldBoard board;
+  final String? etag;
+  final bool notModified;
 }

@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gold_app/models/gold_board_model.dart';
 import 'package:gold_app/models/gold_price_latest_model.dart';
 import 'package:gold_app/repositories/gold_data_repository.dart';
+import 'package:gold_app/services/gold_api_service.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -73,6 +77,55 @@ void main() {
     expect(await repository.refreshForRevision(1), isFalse);
     expect(await repository.refreshForRevision(0), isFalse);
     expect(calls, 1);
+  });
+
+  test(
+    'repository keeps the same snapshot for an unchanged revision',
+    () async {
+      final repository = GoldDataRepository(
+        enableCache: false,
+        updateHomeWidget: false,
+        boardLoader: () async => _board(),
+      );
+
+      final first = await repository.refresh();
+      final second = await repository.refresh();
+
+      expect(identical(first, second), isTrue);
+    },
+  );
+
+  test('repository sends ETag and retains snapshot after HTTP 304', () async {
+    SharedPreferences.setMockInitialValues({});
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      if (calls == 1) {
+        return http.Response(
+          jsonEncode(_board().toJson()),
+          200,
+          headers: {'etag': 'W/"gold-board-1"'},
+        );
+      }
+      expect(request.headers['If-None-Match'], 'W/"gold-board-1"');
+      return http.Response('', 304, headers: {'etag': 'W/"gold-board-1"'});
+    });
+    final repository = GoldDataRepository(
+      apiService: GoldApiService(client: client),
+      updateHomeWidget: false,
+    );
+
+    final first = await repository.refresh();
+    final second = await repository.refresh();
+
+    expect(identical(first, second), isTrue);
+    expect(repository.etag, 'W/"gold-board-1"');
+    expect(repository.refreshCounts[GoldRefreshReason.manual], 2);
+    expect(calls, 2);
+
+    final restored = GoldDataRepository(updateHomeWidget: false);
+    await restored.initialize();
+    expect(restored.etag, 'W/"gold-board-1"');
   });
 }
 

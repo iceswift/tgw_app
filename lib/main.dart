@@ -193,7 +193,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused) {
       _settingsController.lockApp();
     } else if (state == AppLifecycleState.resumed) {
-      GoldDataRepository.instance.refreshIfStale(const Duration(minutes: 2));
+      GoldDataRepository.instance.refreshIfStale(
+        const Duration(minutes: 2),
+        reason: GoldRefreshReason.resume,
+      );
     }
   }
 

@@ -127,7 +127,7 @@ class GoldPricePageState extends State<GoldPricePage> {
     if (cachedSnapshot != null) {
       _bindBoardFuture(Future.value(cachedSnapshot));
       _repository
-          .refresh()
+          .refresh(reason: GoldRefreshReason.startup)
           .then((board) {
             if (mounted) _bindBoardFuture(Future.value(board));
           })
@@ -137,7 +137,7 @@ class GoldPricePageState extends State<GoldPricePage> {
             );
           });
     } else {
-      _loadData();
+      _bindBoardFuture(_repository.refresh(reason: GoldRefreshReason.startup));
     }
   }
 

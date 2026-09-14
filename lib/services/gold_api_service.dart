@@ -8,26 +8,50 @@ import 'package:gold_app/models/shop_price_model.dart';
 import 'package:gold_app/models/gold_board_model.dart';
 
 class GoldApiService {
+  GoldApiService({http.Client? client}) : _client = client ?? http.Client();
+
   static const String baseUrl = 'https://api.thaigoldview.com';
   static const Duration _timeout = Duration(seconds: 15);
+  final http.Client _client;
 
   Future<GoldBoard> getBoard() async {
+    final result = await getBoardResponse();
+    return result.board!;
+  }
+
+  Future<GoldBoardResponse> getBoardResponse({String? etag}) async {
     try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/api/board'))
+      final response = await _client
+          .get(
+            Uri.parse('$baseUrl/api/board'),
+            headers: {
+              if (etag != null && etag.isNotEmpty) 'If-None-Match': etag,
+            },
+          )
           .timeout(_timeout);
+
+      if (response.statusCode == 304) {
+        return GoldBoardResponse.notModified(
+          etag: response.headers['etag'] ?? etag,
+        );
+      }
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> jsonResponse = json.decode(response.body);
-        
+
         // Handle waiting_for_data status
         if (jsonResponse['status'] == 'waiting_for_data') {
           throw Exception('กำลังรอข้อมูลจากแหล่งที่มา...');
         }
-        
-        return GoldBoard.fromJson(jsonResponse);
+
+        return GoldBoardResponse.modified(
+          GoldBoard.fromJson(jsonResponse),
+          etag: response.headers['etag'],
+        );
       } else {
-        throw Exception('Failed to load board data. Status: ${response.statusCode}');
+        throw Exception(
+          'Failed to load board data. Status: ${response.statusCode}',
+        );
       }
     } catch (e) {
       throw Exception('Failed to connect to API: $e');
@@ -36,7 +60,7 @@ class GoldApiService {
 
   Future<List<GoldPrice>> getLatestPrices() async {
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse('$baseUrl/api/history'))
           .timeout(_timeout);
 
@@ -57,7 +81,7 @@ class GoldApiService {
 
   Future<GoldPrice> getCurrentPrice() async {
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse('$baseUrl/api/gold'))
           .timeout(_timeout);
 
@@ -84,7 +108,7 @@ class GoldApiService {
 
   Future<GoldPriceLatest> getLatestPrice() async {
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse('$baseUrl/api/latest'))
           .timeout(_timeout);
 
@@ -107,7 +131,7 @@ class GoldApiService {
 
   Future<List<JewelryPrice>> getJewelryPrices() async {
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse('$baseUrl/api/percent_jewelry'))
           .timeout(_timeout);
 
@@ -133,7 +157,7 @@ class GoldApiService {
 
   Future<List<GoldWeightPrice>> getWeightPrices() async {
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse('$baseUrl/api/weight_jewelry'))
           .timeout(_timeout);
 
@@ -151,7 +175,7 @@ class GoldApiService {
 
   Future<List<ShopPrice>> getShopPrices() async {
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse('$baseUrl/api/shops'))
           .timeout(_timeout);
 
@@ -166,4 +190,22 @@ class GoldApiService {
       throw Exception('Failed to connect to API: $e');
     }
   }
+}
+
+class GoldBoardResponse {
+  const GoldBoardResponse._({
+    required this.board,
+    required this.etag,
+    required this.notModified,
+  });
+
+  factory GoldBoardResponse.modified(GoldBoard board, {String? etag}) =>
+      GoldBoardResponse._(board: board, etag: etag, notModified: false);
+
+  factory GoldBoardResponse.notModified({String? etag}) =>
+      GoldBoardResponse._(board: null, etag: etag, notModified: true);
+
+  final GoldBoard? board;
+  final String? etag;
+  final bool notModified;
 }

@@ -24,7 +24,10 @@ void callbackDispatcher() {
       try {
         final repository = GoldDataRepository();
         await repository.initialize();
-        await repository.refreshIfStale(const Duration(minutes: 10));
+        await repository.refreshIfStale(
+          const Duration(minutes: 10),
+          reason: GoldRefreshReason.background,
+        );
 
         if (kDebugMode) {
           print("Background Task Completed Successfully (Widget Updated)");

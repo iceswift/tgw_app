@@ -321,7 +321,7 @@ class CalculatorPageState extends State<CalculatorPage> {
       if (snapshot != null) _applySnapshot(snapshot);
     });
     if (_repository.snapshot == null) {
-      _repository.refresh();
+      _repository.refresh(reason: GoldRefreshReason.startup);
     }
   }
 
