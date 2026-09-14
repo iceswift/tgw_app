@@ -16,6 +16,21 @@ class NativeBannerAdWidget extends StatefulWidget {
 class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
   late String viewType;
 
+  bool get _isIosStandalonePwa {
+    final navigator = html.window.navigator as dynamic;
+    final userAgent = navigator.userAgent as String? ?? '';
+    final platform = navigator.platform as String? ?? '';
+    final maxTouchPoints = navigator.maxTouchPoints as int? ?? 0;
+    final isIos = RegExp(r'iPad|iPhone|iPod', caseSensitive: false)
+            .hasMatch(userAgent) ||
+        (platform == 'MacIntel' && maxTouchPoints > 1);
+    final isStandalone =
+        html.window.matchMedia('(display-mode: standalone)').matches ||
+        navigator.standalone == true;
+
+    return isIos && isStandalone;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -60,7 +75,11 @@ class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (!AdConfig.showAds) return const SizedBox.shrink();
+    // iOS standalone PWAs can route touches through an HtmlElementView instead
+    // of Flutter's canvas. Keep the app responsive by omitting web ads there.
+    if (!AdConfig.showAds || _isIosStandalonePwa) {
+      return const SizedBox.shrink();
+    }
 
     return Center(
       child: ConstrainedBox(
