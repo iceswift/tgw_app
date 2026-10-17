@@ -11,6 +11,7 @@ self.addEventListener('push', (event) => {
 
   const notification = payload.notification || {};
   const data = payload.data || {};
+  const showUserNotification = data.user_visible === 'true';
   const title = notification.title || 'Thai Gold View';
   const options = {
     body: notification.body || 'ราคาทองมีการอัปเดต',
@@ -21,15 +22,20 @@ self.addEventListener('push', (event) => {
     data: { ...data, url: data.url || '/' },
   };
 
-  event.waitUntil(
-    Promise.all([
-      self.registration.showNotification(title, options),
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-        .then((clients) => clients.forEach((client) =>
-          client.postMessage({ type: 'gold-price-update', data })
-        )),
-    ]),
-  );
+  const work = [
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clients) => clients.forEach((client) =>
+        client.postMessage({ type: 'gold-price-update', data })
+      )),
+  ];
+
+  // Data-only events keep open clients in sync silently. Only Backend-marked
+  // price changes are allowed to create a user-facing notification.
+  if (showUserNotification) {
+    work.unshift(self.registration.showNotification(title, options));
+  }
+
+  event.waitUntil(Promise.all(work));
 });
 
 self.addEventListener('notificationclick', (event) => {
