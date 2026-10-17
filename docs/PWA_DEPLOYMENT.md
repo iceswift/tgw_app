@@ -30,19 +30,18 @@ It validates the allowed topic, subscribes the token with Firebase Admin SDK,
 and returns HTTP 202. CORS allows the production web origins.
 Rate-limit the endpoint and never expose Firebase Admin credentials.
 
-Send an FCM notification plus data payload. The app refreshes `/api/board`
-instead of trusting a pushed price:
+Send a data-only FCM payload. The app refreshes `/api/board` instead of
+trusting a pushed price. The service worker displays a notification only when
+the Backend sets `user_visible` to `true` for a real price-data change.
+Market-status-only events remain silent.
 
 ```json
 {
-  "notification": {
-    "title": "ราคาทองอัปเดต",
-    "body": "แตะเพื่อดูราคาล่าสุด"
-  },
   "data": {
-    "type": "gold_price_update",
+    "type": "gold_snapshot_updated",
     "revision": "1842",
-    "url": "/"
+    "updated_at": "2026-10-17T10:05:00+07:00",
+    "user_visible": "true"
   }
 }
 ```
