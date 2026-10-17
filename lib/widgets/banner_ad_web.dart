@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 import 'dart:math';
@@ -14,15 +16,23 @@ class NativeBannerAdWidget extends StatefulWidget {
 }
 
 class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
+  static const double _bannerHeight = 100;
+  static const double _minimumBannerWidth = 320;
   late String viewType;
+  html.MutationObserver? _adStatusObserver;
+  Timer? _sizeProbe;
+  Timer? _loadTimeout;
+  bool _isVisible = true;
+  bool _hasResolvedStatus = false;
+  bool _hasRequestedAd = false;
 
   bool get _isIosStandalonePwa {
     final navigator = html.window.navigator as dynamic;
     final userAgent = navigator.userAgent as String? ?? '';
     final platform = navigator.platform as String? ?? '';
     final maxTouchPoints = navigator.maxTouchPoints as int? ?? 0;
-    final isIos = RegExp(r'iPad|iPhone|iPod', caseSensitive: false)
-            .hasMatch(userAgent) ||
+    final isIos =
+        RegExp(r'iPad|iPhone|iPod', caseSensitive: false).hasMatch(userAgent) ||
         (platform == 'MacIntel' && maxTouchPoints > 1);
     final isStandalone =
         html.window.matchMedia('(display-mode: standalone)').matches ||
@@ -47,7 +57,8 @@ class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
     ui_web.platformViewRegistry.registerViewFactory(viewType, (int viewId) {
       final container = html.DivElement()
         ..style.width = '100%'
-        ..style.height = '100%'
+        ..style.height = '${_bannerHeight}px'
+        ..style.overflow = 'hidden'
         ..style.display = 'flex'
         ..style.justifyContent = 'center'
         ..style.alignItems = 'center';
@@ -55,41 +66,92 @@ class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
       final ins = html.Element.tag('ins')
         ..className = 'adsbygoogle'
         ..style.display = 'block'
-        ..style.minWidth = '320px'
-        ..style.height = '50px'
+        ..style.width = '100%'
+        ..style.minWidth = '${_minimumBannerWidth}px'
+        ..style.height = '${_bannerHeight}px'
         ..setInnerHtml('')
         ..attributes['data-ad-client'] = adClient
         ..attributes['data-ad-slot'] = adSlot
         ..attributes['data-ad-format'] = 'auto'
         ..attributes['data-full-width-responsive'] = 'true';
 
-      final script = html.ScriptElement()
-        ..innerHtml = '(adsbygoogle = window.adsbygoogle || []).push({});';
+      _adStatusObserver =
+          html.MutationObserver((mutations, observer) {
+            final status = ins.attributes['data-ad-status'];
+            if (status == null) return;
+            _hasResolvedStatus = true;
+            if (status == 'unfilled') {
+              _hideBanner();
+            }
+          })..observe(
+            ins,
+            attributes: true,
+            attributeFilter: const ['data-ad-status'],
+          );
 
       container.append(ins);
-      container.append(script);
+
+      void requestAdWhenSized() {
+        if (_hasRequestedAd || container.clientWidth < _minimumBannerWidth) {
+          return;
+        }
+        _hasRequestedAd = true;
+        _sizeProbe?.cancel();
+
+        // AdSense must only be requested after Flutter has attached and sized
+        // the platform view. Hidden IndexedStack children have width 0.
+        container.append(
+          html.ScriptElement()
+            ..innerHtml = '(adsbygoogle = window.adsbygoogle || []).push({});',
+        );
+
+        _loadTimeout = Timer(const Duration(seconds: 12), () {
+          if (!_hasResolvedStatus) _hideBanner();
+        });
+      }
+
+      _sizeProbe = Timer.periodic(
+        const Duration(milliseconds: 250),
+        (_) => requestAdWhenSized(),
+      );
+      requestAdWhenSized();
 
       return container;
     });
+  }
+
+  void _hideBanner() {
+    if (!mounted || !_isVisible) return;
+    setState(() => _isVisible = false);
+  }
+
+  @override
+  void dispose() {
+    _loadTimeout?.cancel();
+    _sizeProbe?.cancel();
+    _adStatusObserver?.disconnect();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     // iOS standalone PWAs can route touches through an HtmlElementView instead
     // of Flutter's canvas. Keep the app responsive by omitting web ads there.
-    if (!AdConfig.showAds || _isIosStandalonePwa) {
+    if (!AdConfig.showAds || _isIosStandalonePwa || !_isVisible) {
       return const SizedBox.shrink();
     }
 
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          minWidth: 320,
-          minHeight: 50,
-          maxWidth: 600, // Reasonable max width for top banners
-          maxHeight: 100,
+    return SizedBox(
+      width: double.infinity,
+      height: _bannerHeight,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minWidth: _minimumBannerWidth,
+            maxWidth: 600,
+          ),
+          child: SizedBox.expand(child: HtmlElementView(viewType: viewType)),
         ),
-        child: HtmlElementView(viewType: viewType),
       ),
     );
   }
