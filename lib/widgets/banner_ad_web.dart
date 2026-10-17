@@ -59,6 +59,12 @@ class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
         ..style.width = '100%'
         ..style.height = '${_bannerHeight}px'
         ..style.overflow = 'hidden'
+        // A platform view paints as an opaque grey surface while AdSense is
+        // still resolving the slot. Keep that surface transparent until an
+        // actual creative has been filled.
+        ..style.opacity = '0'
+        ..style.pointerEvents = 'none'
+        ..style.backgroundColor = 'transparent'
         ..style.display = 'flex'
         ..style.justifyContent = 'center'
         ..style.alignItems = 'center';
@@ -69,6 +75,7 @@ class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
         ..style.width = '100%'
         ..style.minWidth = '${_minimumBannerWidth}px'
         ..style.height = '${_bannerHeight}px'
+        ..style.backgroundColor = 'transparent'
         ..setInnerHtml('')
         ..attributes['data-ad-client'] = adClient
         ..attributes['data-ad-slot'] = adSlot
@@ -80,7 +87,11 @@ class _NativeBannerAdWidgetState extends State<NativeBannerAdWidget> {
             final status = ins.attributes['data-ad-status'];
             if (status == null) return;
             _hasResolvedStatus = true;
-            if (status == 'unfilled') {
+            if (status == 'filled') {
+              container.style
+                ..opacity = '1'
+                ..pointerEvents = 'auto';
+            } else if (status == 'unfilled') {
               _hideBanner();
             }
           })..observe(
