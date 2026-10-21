@@ -1,6 +1,65 @@
 # Thai Gold View
 
-Flutter app for Thai gold prices, released as Android and as a Flutter Web PWA at `https://thaigoldview.com`.
+<img src="assets/icon/logo.png" alt="Thai Gold View logo" width="96">
+
+A Flutter application for tracking Thai gold prices, reviewing price history, and calculating gold values. The project connects a mobile and PWA frontend to a Python scraping API running on an Ubuntu home server.
+
+**[Live Demo](https://thaigoldview.com) · [Live API Sample](https://api.thaigoldview.com/api/board) · [Backend Repository](https://github.com/iceswift/aurum-thai)**
+
+## Project overview
+
+Thai Gold View brings price information, history, charts, and a calculator into one application. Its engineering focus is keeping data consistent across screens while avoiding duplicate requests and unnecessary transfers.
+
+| Layer | Technology |
+| --- | --- |
+| Application | Flutter, Dart, Android, Progressive Web App |
+| Client state and caching | Shared data repository, local persistence, revision-aware refresh |
+| Backend | Python, FastAPI, asynchronous Playwright scraping |
+| Notifications | Firebase Cloud Messaging and a Web service worker |
+| Hosting | Ubuntu home server, Docker, Nginx, Cloudflare Tunnel |
+
+## Engineering highlights
+
+- **Consistent screen data:** prices, history, and calculator data flow through a shared board repository rather than independent page requests.
+- **Request coordination:** concurrent refreshes share a request, and ETag support lets the API return `304 Not Modified` when the snapshot has not changed.
+- **Cached access:** the latest snapshot is persisted locally and restored when the application starts.
+- **Push-driven refresh:** FCM carries a revision signal; the application retrieves the authoritative snapshot from the API.
+- **Production deployment:** Web builds are published into separate release directories with a previous release available for rollback.
+
+## System architecture
+
+```mermaid
+flowchart LR
+    Source[Gold price website] --> Scraper[Playwright scraper]
+    Scraper --> API[FastAPI and persistent snapshot]
+    API -->|Revision signal| FCM[Firebase Cloud Messaging]
+    FCM --> App[Flutter Android and PWA]
+    App -->|GET /api/board with ETag| API
+    App --> Cache[Local snapshot cache]
+    API --> Tunnel[Cloudflare Tunnel]
+    Web[Nginx static Web build] --> Tunnel
+```
+
+## Selected engineering decisions
+
+| Problem | Approach |
+| --- | --- |
+| Several screens could display different price snapshots. | Centralize fetching and distribute one shared snapshot. |
+| Polling unchanged data wastes bandwidth. | Compare server revisions and use conditional requests with ETags. |
+| A push payload can become outdated before it is opened. | Use push as a refresh signal and fetch prices from the API. |
+| A day change triggered a misleading midnight price alert. | Persist market-status revisions without broadcasting a price push, and require an explicit visibility flag in the Web worker. |
+| Embedded Web ad surfaces interfered with touch input. | Disable Web banner ads while keeping the mobile implementation separate. |
+
+## Scope and limitations
+
+Price freshness depends on the source website and the Backend scraping schedule; this is not a streaming market feed. Local cache supports viewing the last saved snapshot when a refresh is unavailable. Shop scraping is currently disabled on the production Backend. Availability depends on the home server and its Internet connection.
+
+## Code guide
+
+- [`lib/repositories/`](lib/repositories/): shared snapshot fetching and refresh coordination.
+- [`lib/services/fcm_service.dart`](lib/services/fcm_service.dart): Firebase messaging and Web token registration.
+- [`web/firebase-messaging-sw.js`](web/firebase-messaging-sw.js): browser push and notification-click handling.
+- [`test/`](test/): snapshot parsing, caching, deduplication, and conditional-refresh tests.
 
 ## Data flow
 
